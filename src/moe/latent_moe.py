@@ -12,9 +12,10 @@ from typing import Any, Literal, Optional
 class Expert(nn.Module): # Pa que no se queje ni na
     def __init__(self, in_dim: int, m: int, bias: bool = False, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        self.linear = nn.Linear(in_dim, m, bias=bias)
 
     def forward(self,x, *args):
-        pass
+        return self.linear(x)
 
 class Router(nn.Module): # Pa que no se queje ni na
     def __init__(self,d,n_experts,top_k, *args: Any, **kwargs: Any) -> None:# d: dim embedinbs, n_experts, top_k expertos que influyen en cada token
