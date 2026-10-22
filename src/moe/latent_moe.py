@@ -17,12 +17,32 @@ class Expert(nn.Module): # Pa que no se queje ni na
     def forward(self,x, *args):
         return self.linear(x)
 
-class Router(nn.Module): # Pa que no se queje ni na
-    def __init__(self,d,n_experts,top_k, *args: Any, **kwargs: Any) -> None:# d: dim embedinbs, n_experts, top_k expertos que influyen en cada token
-        super().__init__(*args, **kwargs)
 
-    def forward(self, *args):
-        pass
+class Router(nn.Module):
+    def __init__(
+        self,
+        d: int,
+        n_experts: int,
+        top_k: int,
+        bias: bool = False
+    ):
+        super(Router, self).__init__()
+
+        self.experts_per_tok = top_k
+
+        self.linear = nn.Linear(
+            in_features=d,
+            out_features=n_experts,
+            bias=bias,
+        )
+
+    def forward(self, x: torch.Tensor):
+        scores = self.linear(x)
+        scores = torch.softmax(scores, dim=-1)
+        indices = torch.topk(scores, self.experts_per_tok, dim=-1)[1]
+        weights = scores.gather(1, indices)
+        weights *= 1.2
+        return weights.type_as(x), indices
 
 
 class LatentMoe(nn.Module):

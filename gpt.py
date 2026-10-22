@@ -90,7 +90,7 @@ class FeedForward(nn.Module):
         )
 
     def forward(self, x: torch.Tensor):
-        self.layers(x)
+        return self.layers(x)
 
 
 class TransformerBlock(nn.Module):
@@ -127,6 +127,7 @@ class TransformerBlock(nn.Module):
 
 class GPTModel(nn.Module):
     def __init__(self, cfg: dict):
+        super(GPTModel, self).__init__()
         self.tok_emb = nn.Embedding(cfg["vocab_size"], cfg["emb_dim"])
         self.pos_emb = nn.Embedding(cfg["context_length"], cfg["emb_dim"])
         self.drop_emb = nn.Dropout(cfg["drop_rate"])
@@ -156,89 +157,62 @@ def assign(left, right):
 
 
 def load_weights_into_gpt(gpt, params):
-    gpt.pos_emb.weight = assign(gpt.pos_emb.weight, params["wpe"])
-    gpt.tok_emb.weight = assign(gpt.tok_emb.weight, params["wte"])
+    gpt.pos_emb.weight = assign(gpt.pos_emb.weight, params["wpe.weight"])
+    gpt.tok_emb.weight = assign(gpt.tok_emb.weight, params["wte.weight"])
 
-    for b in range(len(params["blocks"])):
-        q_w, k_w, v_w = np.split(
-            (params["blocks"][b]["attn"]["c_attn"])["w"],
-            3,
-            axis=-1
-        )
+    for b in range(len(gpt.trf_blocks)):
+        q_w, k_w, v_w = torch.chunk(
+            params[f"h.{b}.attn.c_attn.weight"], 3, axis=-1)
         gpt.trf_blocks[b].att.W_query.weight = assign(
-            gpt.trf_blocks[b].att.W_query.weight,
-            q_w.T
-        )
+            gpt.trf_blocks[b].att.W_query.weight, q_w.T)
         gpt.trf_blocks[b].att.W_key.weight = assign(
-            gpt.trf_blocks[b].att.W_key.weight,
-            k_w.T
-        )
+            gpt.trf_blocks[b].att.W_key.weight, k_w.T)
         gpt.trf_blocks[b].att.W_value.weight = assign(
-            gpt.trf_blocks[b].att.W_value.weight,
-            v_w.T
-        )
+            gpt.trf_blocks[b].att.W_value.weight, v_w.T)
 
-        q_b, k_b, v_b = np.split(
-            (params["blocks"][b]["attn"]["c_attn"])["b"],
-            3,
-            axis=-1
-        )
+        q_b, k_b, v_b = torch.chunk(
+            params[f"h.{b}.attn.c_attn.bias"], 3, axis=-1)
         gpt.trf_blocks[b].att.W_query.bias = assign(
-            gpt.trf_blocks[b].att.W_query.bias,
-            q_b
-        )
+            gpt.trf_blocks[b].att.W_query.bias, q_b)
         gpt.trf_blocks[b].att.W_key.bias = assign(
-            gpt.trf_blocks[b].att.W_key.bias,
-            k_b
-        )
+            gpt.trf_blocks[b].att.W_key.bias, k_b)
         gpt.trf_blocks[b].att.W_value.bias = assign(
-            gpt.trf_blocks[b].att.W_value.bias,
-            v_b
-        )
+            gpt.trf_blocks[b].att.W_value.bias, v_b)
 
         gpt.trf_blocks[b].att.out_proj.weight = assign(
             gpt.trf_blocks[b].att.out_proj.weight,
-            params["blocks"][b]["attn"]["c_proj"]["w"].T
-        )
+            params[f"h.{b}.attn.c_proj.weight"].T)
         gpt.trf_blocks[b].att.out_proj.bias = assign(
             gpt.trf_blocks[b].att.out_proj.bias,
-            params["blocks"][b]["attn"]["c_proj"]["b"]
-        )
+            params[f"h.{b}.attn.c_proj.bias"])
 
         gpt.trf_blocks[b].ff.layers[0].weight = assign(
             gpt.trf_blocks[b].ff.layers[0].weight,
-            params["blocks"][b]["mlp"]["c_fc"]["w"].T
-        )
+            params[f"h.{b}.mlp.c_fc.weight"].T)
         gpt.trf_blocks[b].ff.layers[0].bias = assign(
             gpt.trf_blocks[b].ff.layers[0].bias,
-            params["blocks"][b]["mlp"]["c_fc"]["b"]
-        )
+            params[f"h.{b}.mlp.c_fc.bias"])
         gpt.trf_blocks[b].ff.layers[2].weight = assign(
             gpt.trf_blocks[b].ff.layers[2].weight,
-            params["blocks"][b]["mlp"]["c_proj"]["w"].T
-        )
+            params[f"h.{b}.mlp.c_proj.weight"].T)
         gpt.trf_blocks[b].ff.layers[2].bias = assign(
             gpt.trf_blocks[b].ff.layers[2].bias,
-            params["blocks"][b]["mlp"]["c_proj"]["b"]
-        )
+            params[f"h.{b}.mlp.c_proj.bias"])
 
         gpt.trf_blocks[b].norm1.scale = assign(
             gpt.trf_blocks[b].norm1.scale,
-            params["blocks"][b]["ln_1"]["g"]
-        )
+            params[f"h.{b}.ln_1.weight"])
         gpt.trf_blocks[b].norm1.shift = assign(
             gpt.trf_blocks[b].norm1.shift,
-            params["blocks"][b]["ln_1"]["b"]
-        )
+            params[f"h.{b}.ln_1.bias"])
         gpt.trf_blocks[b].norm2.scale = assign(
             gpt.trf_blocks[b].norm2.scale,
-            params["blocks"][b]["ln_2"]["g"]
-        )
+            params[f"h.{b}.ln_2.weight"])
         gpt.trf_blocks[b].norm2.shift = assign(
             gpt.trf_blocks[b].norm2.shift,
-            params["blocks"][b]["ln_2"]["b"]
-        )
+            params[f"h.{b}.ln_2.bias"])
 
-    gpt.final_norm.scale = assign(gpt.final_norm.scale, params["g"])
-    gpt.final_norm.shift = assign(gpt.final_norm.shift, params["b"])
-    gpt.out_head.weight = assign(gpt.out_head.weight, params["wte"])
+    gpt.final_norm.scale = assign(gpt.final_norm.scale, params["ln_f.weight"])
+    gpt.final_norm.shift = assign(gpt.final_norm.shift, params["ln_f.bias"])
+    gpt.out_head.weight = assign(gpt.out_head.weight, params["wte.weight"])
+
