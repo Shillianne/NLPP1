@@ -1,6 +1,27 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from dataclasses import dataclass
+from typing import TypeVar, Generic
+from src.moe.latent_moe import LatentMoe
+
+
+@dataclass
+class Config:
+    vocab_size: int = 50257
+    context_length: int = 1024
+    drop_rate: float = 0.0
+    qkv_bias: bool = True
+    emb_dim: int = 768
+    n_layers: int = 12
+    n_heads: int = 12
+    n_experts: int = 8
+    top_k: int = 2
+    bias: bool = False
+    d: int = emb_dim
+    m: int = 256
+    latent: int = 256
+    n_shared_exp: int = 1
 
 
 class MultiHeadAttention(nn.Module):
@@ -81,33 +102,43 @@ class GELU(nn.Module):
 
 
 class FeedForward(nn.Module):
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: Config):
         super().__init__()
         self.layers = nn.Sequential(
-            nn.Linear(cfg["emb_dim"], 4 * cfg["emb_dim"]),
+            nn.Linear(cfg.emb_dim, 4 * cfg.emb_dim),
             GELU(),
-            nn.Linear(4 * cfg["emb_dim"], cfg["emb_dim"]),
+            nn.Linear(4 * cfg.emb_dim, cfg.emb_dim),
         )
 
     def forward(self, x: torch.Tensor):
         return self.layers(x)
 
 
+class Base:
+    ...
+
+
+Kind = TypeVar("Kind", Base, LatentMoe)
+
+
 class TransformerBlock(nn.Module):
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: Config, ff: Kind = Base):
         super().__init__()
         self.att = MultiHeadAttention(
-            d_in=cfg["emb_dim"],
-            d_out=cfg["emb_dim"],
-            context_length=cfg["context_length"],
-            num_heads=cfg["n_heads"],
-            dropout=cfg["drop_rate"],
-            qkv_bias=cfg["qkv_bias"]
+            d_in=cfg.emb_dim,
+            d_out=cfg.emb_dim,
+            context_length=cfg.context_length,
+            num_heads=cfg.n_heads,
+            dropout=cfg.drop_rate,
+            qkv_bias=cfg.qkv_bias
         )
-        self.ff = FeedForward(cfg)
-        self.norm1 = LayerNorm(cfg["emb_dim"])
-        self.norm2 = LayerNorm(cfg["emb_dim"])
-        self.drop_resid = nn.Dropout(cfg["drop_rate"])
+        if ff == Base:
+            self.ff = FeedForward(cfg)
+        else:
+            self.ff = LatentMoe(cfg)
+        self.norm1 = LayerNorm(cfg.emb_dim)
+        self.norm2 = LayerNorm(cfg.emb_dim)
+        self.drop_resid = nn.Dropout(cfg.drop_rate)
 
     def forward(self, x: torch.Tensor):
         shortcut = x
@@ -125,18 +156,18 @@ class TransformerBlock(nn.Module):
         return x
 
 
-class GPTModel(nn.Module):
-    def __init__(self, cfg: dict):
+class GPTModel(Generic[Kind], nn.Module):
+    def __init__(self, cfg: Config, ff: Kind = Base):
         super(GPTModel, self).__init__()
-        self.tok_emb = nn.Embedding(cfg["vocab_size"], cfg["emb_dim"])
-        self.pos_emb = nn.Embedding(cfg["context_length"], cfg["emb_dim"])
-        self.drop_emb = nn.Dropout(cfg["drop_rate"])
+        self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.emb_dim)
+        self.pos_emb = nn.Embedding(cfg.context_length, cfg.emb_dim)
+        self.drop_emb = nn.Dropout(cfg.drop_rate)
 
         self.trf_blocks = nn.Sequential(
-            *[TransformerBlock(cfg) for _ in range(cfg["n_layers"])]
+            *[TransformerBlock(cfg, ff=ff) for _ in range(cfg.n_layers)]
         )
-        self.final_norm = LayerNorm(cfg["emb_dim"])
-        self.out_head = nn.Linear(cfg["emb_dim"], cfg["vocab_size"], bias=False)
+        self.final_norm = LayerNorm(cfg.emb_dim)
+        self.out_head = nn.Linear(cfg.emb_dim, cfg.vocab_size, bias=False)
 
     def forward(self, in_idx: torch.Tensor):
         batch_size, seq_len = in_idx.shape
@@ -156,7 +187,7 @@ def assign(left, right):
     return torch.nn.Parameter(torch.tensor(right))
 
 
-def load_weights_into_gpt(gpt, params):
+def load_weights_into_gpt(gpt, params, latent: bool = False):
     gpt.pos_emb.weight = assign(gpt.pos_emb.weight, params["wpe.weight"])
     gpt.tok_emb.weight = assign(gpt.tok_emb.weight, params["wte.weight"])
 
@@ -186,18 +217,19 @@ def load_weights_into_gpt(gpt, params):
             gpt.trf_blocks[b].att.out_proj.bias,
             params[f"h.{b}.attn.c_proj.bias"])
 
-        gpt.trf_blocks[b].ff.layers[0].weight = assign(
-            gpt.trf_blocks[b].ff.layers[0].weight,
-            params[f"h.{b}.mlp.c_fc.weight"].T)
-        gpt.trf_blocks[b].ff.layers[0].bias = assign(
-            gpt.trf_blocks[b].ff.layers[0].bias,
-            params[f"h.{b}.mlp.c_fc.bias"])
-        gpt.trf_blocks[b].ff.layers[2].weight = assign(
-            gpt.trf_blocks[b].ff.layers[2].weight,
-            params[f"h.{b}.mlp.c_proj.weight"].T)
-        gpt.trf_blocks[b].ff.layers[2].bias = assign(
-            gpt.trf_blocks[b].ff.layers[2].bias,
-            params[f"h.{b}.mlp.c_proj.bias"])
+        if not latent:
+            gpt.trf_blocks[b].ff.layers[0].weight = assign(
+                gpt.trf_blocks[b].ff.layers[0].weight,
+                params[f"h.{b}.mlp.c_fc.weight"].T)
+            gpt.trf_blocks[b].ff.layers[0].bias = assign(
+                gpt.trf_blocks[b].ff.layers[0].bias,
+                params[f"h.{b}.mlp.c_fc.bias"])
+            gpt.trf_blocks[b].ff.layers[2].weight = assign(
+                gpt.trf_blocks[b].ff.layers[2].weight,
+                params[f"h.{b}.mlp.c_proj.weight"].T)
+            gpt.trf_blocks[b].ff.layers[2].bias = assign(
+                gpt.trf_blocks[b].ff.layers[2].bias,
+                params[f"h.{b}.mlp.c_proj.bias"])
 
         gpt.trf_blocks[b].norm1.scale = assign(
             gpt.trf_blocks[b].norm1.scale,
