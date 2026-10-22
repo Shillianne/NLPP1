@@ -9,13 +9,23 @@ import torch.nn.functional as F
 
 from typing import Any, Literal, Optional
 
-class Expert(nn.Module): # Pa que no se queje ni na
+class Expert(nn.Module): 
     def __init__(self, in_dim: int, m: int, bias: bool = False, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.linear = nn.Linear(in_dim, m, bias=bias)
+        self.w1 = nn.Linear(in_dim, m, bias=bias)
+        self.w2 = nn.Linear(in_dim, m, bias=bias)
+        self.w3 = nn.Linear(m, in_dim, bias=bias)
+
 
     def forward(self,x, *args):
-        return self.linear(x)
+
+        gate = self.w1(x)
+        value = self.w2(x)
+
+        activated = F.silu(gate) * value
+
+        out = self.w3(activated)
+        return out
 
 
 class Router(nn.Module):
