@@ -83,21 +83,52 @@ class LatentMoe(nn.Module):
         T=x_flat.shape[0]
 
         topk_pesos,topk_idx=self.router(x_flat) # preguntar a gabriel
-        # TODO : hacer la loss, edit despues de ver el codigo de github, grabriel me pasa logits y probs?
         x_reducido = self.W_down(x) # (T,latent)
 
         flat_idx=topk_idx.reshape(-1) # esto pasa a (T*top_k,)
-        flat_pesos=topk_idx.reshape(-1) # (T*top_k,)
+        flat_pesos=topk_pesos.reshape(-1) # (T*top_k,)
         token_ids=torch.arange(T,device=self.device).repeat_interleave(self.top_k)# (T*top_k,) que es por asi decirlo una lista enumerada de la longitud de T y cada numero se repite topk veces
 
 
         # empezamos a repartir a los expertos
         # TODO: COMO MIERDA HAGO LO DE DIVIDIR ENTRE LOS EXPERTOS
+        # postada, esta parte la he escrito mirando el repo de latent moe k no sabia como hacerlo
+
+        ids_ordenadas = torch.argsort(flat_idx)
+        tokens_odenados = token_ids[ids_ordenadas]
+        pesos_ordenados = flat_pesos[ids_ordenadas]
+        z_sorted = x_reducido[tokens_odenados]
+
+        counts = torch.bincount(
+            flat_idx,minlength=self.n_experts
+        )
+
+        offsets = torch.cumsum(counts,dim=0)
+        counts_list= counts.tolist()
+        ends=offsets.tolist()
 
 
 
-        y = self.W_up(Tensor) 
-        for exp in self.shared_experts:
+        out_sorted = torch.empty_like(z_sorted)  # (S, l)
+        start = 0
+        for e, n_e in enumerate(counts_list):
+            if n_e == 0:
+                continue
+            end = ends[e]
+            out_sorted[start:end] = self.experts[e](
+                z_sorted[start:end]
+            )
+            start = end
+
+        latent_out = torch.zeros_like(x_reducido)  # (T, l)
+        latent_out.index_add_(
+            0, tokens_odenados, out_sorted * pesos_ordenados.unsqueeze(-1)
+        )
+
+
+
+        y = self.W_up(latent_out) 
+        for exp in self.shared_experts: # estos, pos los expertos que no se meten en el latent
             y=y+exp(x_flat)
 
         return y.reshape(x_shape).to(input_device)
