@@ -71,10 +71,10 @@ class LatentMoe(nn.Module):
             Expert(latent,m,bias=self.bias) for _ in range(config.n_experts)
         )
 
-        self.router = Router(d,self.n_experts,self.top_k,bias=self.bias) # como pollas lo hago # 1ºque devuelve: pesos, 2º indices (b, n_tokens_total, n_exters)
+        self.router = Router(d,self.n_experts,self.top_k,bias=self.bias) # 1ºque devuelve: pesos, 2º indices (b, n_tokens_total, n_exters)
         self.shared_experts = nn.ModuleList(Expert(d,m,bias=self.bias) for _ in range(config.n_shared_exp))
 
-    def forward(self, x:Tensor) -> Tensor: # meto la loss al final, primero la arquietectura
+    def forward(self, x:Tensor) -> Tensor: 
         x_shape=x.shape
         input_device=x.device
         d=self.config.d
@@ -82,7 +82,7 @@ class LatentMoe(nn.Module):
         x_flat=x.reshape(-1,d) # esto lo pasa a (T,d)
         T=x_flat.shape[0]
 
-        topk_pesos,topk_idx=self.router(x_flat) # preguntar a gabriel
+        topk_pesos,topk_idx=self.router(x_flat) 
         x_reducido = self.W_down(x_flat) # (T,latent)
 
         flat_idx=topk_idx.reshape(-1) # esto pasa a (T*top_k,)
@@ -91,8 +91,7 @@ class LatentMoe(nn.Module):
 
 
         # empezamos a repartir a los expertos
-        # TODO: COMO MIERDA HAGO LO DE DIVIDIR ENTRE LOS EXPERTOS
-        # postada, esta parte la he escrito mirando el repo de latent moe k no sabia como hacerlo
+
 
         ids_ordenadas = torch.argsort(flat_idx)
         tokens_odenados = token_ids[ids_ordenadas]
