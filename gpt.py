@@ -10,6 +10,7 @@ from src.moe.latent_moe import LatentMoe
 class Config:
     vocab_size: int = 50257
     context_length: int = 1024
+    batch_size: int = 2
     drop_rate: float = 0.0
     qkv_bias: bool = True
     emb_dim: int = 768
@@ -189,7 +190,9 @@ def assign(left, right):
 
 def load_weights_into_gpt(gpt, params, latent: bool = False):
     gpt.pos_emb.weight = assign(gpt.pos_emb.weight, params["wpe.weight"])
+    gpt.pos_emb.weight.requires_grad = False
     gpt.tok_emb.weight = assign(gpt.tok_emb.weight, params["wte.weight"])
+    gpt.tok_emb.weight.requires_grad = False
 
     for b in range(len(gpt.trf_blocks)):
         q_w, k_w, v_w = torch.chunk(
@@ -200,6 +203,9 @@ def load_weights_into_gpt(gpt, params, latent: bool = False):
             gpt.trf_blocks[b].att.W_key.weight, k_w.T)
         gpt.trf_blocks[b].att.W_value.weight = assign(
             gpt.trf_blocks[b].att.W_value.weight, v_w.T)
+        gpt.trf_blocks[b].att.W_query.weight.requires_grad = False
+        gpt.trf_blocks[b].att.W_key.weight.requires_grad = False
+        gpt.trf_blocks[b].att.W_value.weight.requires_grad = False
 
         q_b, k_b, v_b = torch.chunk(
             params[f"h.{b}.attn.c_attn.bias"], 3, axis=-1)
@@ -209,6 +215,9 @@ def load_weights_into_gpt(gpt, params, latent: bool = False):
             gpt.trf_blocks[b].att.W_key.bias, k_b)
         gpt.trf_blocks[b].att.W_value.bias = assign(
             gpt.trf_blocks[b].att.W_value.bias, v_b)
+        gpt.trf_blocks[b].att.W_query.bias.requires_grad = False
+        gpt.trf_blocks[b].att.W_key.bias.requires_grad = False
+        gpt.trf_blocks[b].att.W_value.bias.requires_grad = False
 
         gpt.trf_blocks[b].att.out_proj.weight = assign(
             gpt.trf_blocks[b].att.out_proj.weight,
@@ -216,6 +225,8 @@ def load_weights_into_gpt(gpt, params, latent: bool = False):
         gpt.trf_blocks[b].att.out_proj.bias = assign(
             gpt.trf_blocks[b].att.out_proj.bias,
             params[f"h.{b}.attn.c_proj.bias"])
+        gpt.trf_blocks[b].att.out_proj.weight.requires_grad = False
+        gpt.trf_blocks[b].att.out_proj.bias.requires_grad = False
 
         if not latent:
             gpt.trf_blocks[b].ff.layers[0].weight = assign(
@@ -230,6 +241,10 @@ def load_weights_into_gpt(gpt, params, latent: bool = False):
             gpt.trf_blocks[b].ff.layers[2].bias = assign(
                 gpt.trf_blocks[b].ff.layers[2].bias,
                 params[f"h.{b}.mlp.c_proj.bias"])
+            gpt.trf_blocks[b].ff.layers[0].weight.requires_grad = False
+            gpt.trf_blocks[b].ff.layers[0].bias.requires_grad = False
+            gpt.trf_blocks[b].ff.layers[2].weight.requires_grad = False
+            gpt.trf_blocks[b].ff.layers[2].bias.requires_grad = False
 
         gpt.trf_blocks[b].norm1.scale = assign(
             gpt.trf_blocks[b].norm1.scale,
@@ -243,8 +258,15 @@ def load_weights_into_gpt(gpt, params, latent: bool = False):
         gpt.trf_blocks[b].norm2.shift = assign(
             gpt.trf_blocks[b].norm2.shift,
             params[f"h.{b}.ln_2.bias"])
+        gpt.trf_blocks[b].norm1.scale.requires_grad = False
+        gpt.trf_blocks[b].norm1.shift.requires_grad = False
+        gpt.trf_blocks[b].norm2.scale.requires_grad = False
+        gpt.trf_blocks[b].norm2.shift.requires_grad = False
 
     gpt.final_norm.scale = assign(gpt.final_norm.scale, params["ln_f.weight"])
     gpt.final_norm.shift = assign(gpt.final_norm.shift, params["ln_f.bias"])
     gpt.out_head.weight = assign(gpt.out_head.weight, params["wte.weight"])
+    gpt.final_norm.scale.requires_grad = False
+    gpt.final_norm.shift.requires_grad = False
+    gpt.out_head.weight.requires_grad = False
 
