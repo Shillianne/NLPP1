@@ -269,4 +269,3 @@ def load_weights_into_gpt(gpt, params, latent: bool = False):
     gpt.final_norm.scale.requires_grad = False
     gpt.final_norm.shift.requires_grad = False
     gpt.out_head.weight.requires_grad = False
-
